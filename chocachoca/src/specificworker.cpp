@@ -24,6 +24,10 @@
 SpecificWorker::SpecificWorker(TuplePrx tprx, bool startup_check) : GenericWorker(tprx)
 {
 	this->startup_check_flag = startup_check;
+	for(int i = 0 ; i < tam_tab ; i++)
+	    for (int j = 0; j < tam_tab ; j++)
+            this->pos[i][j] = false;
+	this->est = Estado::avanzar;
 }
 
 /**
@@ -72,24 +76,26 @@ void SpecificWorker::initialize(int period)
 void SpecificWorker::compute()
 {
     const float threshold = 200; // millimeters
-    float rot = 0.6;  // rads per second
+     // rads per second
+    int i = 0, j = 0;
+    float alpha = 0;
+    RoboCompLaser::TLaserData ldata = laser_proxy->getLaserData();
+    std::sort( ldata.begin(), ldata.end(), [](RoboCompLaser::TData a, RoboCompLaser::TData b){ return     a.dist < b.dist; });
 
     try
     {
-        // read laser data
-        RoboCompLaser::TLaserData ldata = laser_proxy->getLaserData();
-        //sort laser data from small to large distances using a lambda function.
-        std::sort( ldata.begin(), ldata.end(), [](RoboCompLaser::TData a, RoboCompLaser::TData b){ return     a.dist < b.dist; });
+        this->differentialrobot_proxy->getBasePose(i, j, alpha);
+        int ti = k(i);
+        int tj = k(j);
+        this->pos[ti][tj] = true;
 
-        if( ldata.front().dist < threshold)
-        {
-            std::cout << ldata.front().dist << std::endl;
-            differentialrobot_proxy->setSpeedBase(5, rot);
-            usleep(rand()%(1500000-100000 + 1) + 100000);  // random wait between 1.5s and 0.1sec
-        }
-        else
-        {
-            differentialrobot_proxy->setSpeedBase(200, 0);
+        switch (this->est){
+            case Estado::avanzar:
+                avanzar(threshold, ldata.front(), ti, tj);
+                break;
+            case Estado::pared:
+// random wait between 1.5s and 0.1sec
+                break;
         }
     }
     catch(const Ice::Exception &ex)
@@ -103,6 +109,73 @@ int SpecificWorker::startup_check()
 	std::cout << "Startup check" << std::endl;
 	QTimer::singleShot(200, qApp, SLOT(quit()));
 	return 0;
+}
+
+int SpecificWorker::k(int cord) {
+    int result = cord + 2500;
+    return (int)result/10;
+}
+
+bool SpecificWorker::siguienteOcupada(int i, int j) {
+    int si, sj;
+    float alpha;
+    this->differentialrobot_proxy->getBasePose(si, sj, alpha);
+    if( alpha < 0.5367 || alpha > 5.7727){
+        sj = j + 1;
+        si = i;
+    } else if (alpha > 0.5367 && alpha < 1.0603){
+        sj = j + 1;
+        si = i + 1;
+    } else if (alpha > 1.0603 && alpha < 2.1075){
+        sj = j;
+        si = i + 1;
+    } else if (alpha > 2.1075 && alpha < 2.6311){
+        sj = j - 1;
+        si = i + 1;
+    } else if (alpha > 2.6311 && alpha < 3.6783){
+        sj = j - 1;
+        si = i;
+    } else if (alpha > 3.6783 && alpha < 4.2019){
+        sj = j - 1;
+        si = i - 1;
+    } else if (alpha > 4.2019 && alpha < 5.2491){
+        sj = j;
+        si = i - 1;
+    } else if (alpha > 5.2421 && alpha < 5.7727){
+        sj = j + 1;
+        si = i - 1;
+    }
+
+    return this->pos[si][sj];
+}
+
+void SpecificWorker::avanzar(float threshold, auto distActual, int i, int j) {
+    //Condición de salida
+    if (threshold > distActual){
+        this->est = Estado::pared;
+        differentialrobot_proxy->setSpeedBase(0, 0);
+        return;
+    } else if(siguienteOcupada(i, j)){
+        this->est = Estado::rotar;
+        differentialrobot_proxy->setSpeedBase(0, 0);
+        return;
+    }
+    differentialrobot_proxy->setSpeedBase(1000, 0);
+}
+
+void SpecificWorker::pared(float threshold,  RoboCompLaser::TLaserData ldata , int i, int j) {
+    float rot = 1.5708;
+    if (threshold < ldata.front().dist){
+        this->est = Estado::avanzar;
+        return;
+    }
+    std::cout << ldata.front().dist << std::endl;
+    differentialrobot_proxy->setSpeedBase(5, rot);
+    usleep(rand()%(1500000-100000 + 1) + 100000);
+}
+
+void SpecificWorker::bloqueo() {
+
 }
 
 

@@ -30,6 +30,9 @@
 #include <genericworker.h>
 #include <innermodel/innermodel.h>
 
+const int tam_tab = 500;
+enum Estado{ avanzar, pared, bloqueo, rotar};
+
 class SpecificWorker : public GenericWorker
 {
 Q_OBJECT
@@ -47,6 +50,13 @@ public slots:
 private:
 	std::shared_ptr < InnerModel > innerModel;
 	bool startup_check_flag;
+	void avanzar(float treshold, auto distActual, int i, int j);
+	void pared(float threshold,  RoboCompLaser::TLaserData ldata , int i, int j);
+	void bloqueo();
+	bool pos[tam_tab][tam_tab];
+	bool siguienteOcupada(int i, int j);
+	Estado est;
+	int k(int cord);
 
 };
 
