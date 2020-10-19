@@ -28,6 +28,9 @@ SpecificWorker::SpecificWorker(TuplePrx tprx, bool startup_check) : GenericWorke
 	    for (int j = 0; j < tam_tab ; j++)
             this->pos[i][j] = false;
 	this->est = Estado::avanzar;
+	this->rotando = false;
+	this->bloqueado = false;
+	this->rotaciones = 0;
 }
 
 /**
@@ -88,13 +91,16 @@ void SpecificWorker::compute()
         int ti = k(i);
         int tj = k(j);
         this->pos[ti][tj] = true;
-
+        float target = 0;
         switch (this->est){
             case Estado::avanzar:
-                avanzar(threshold, ldata.front(), ti, tj);
+                this->avanzar(threshold, ldata, ti, tj);
                 break;
             case Estado::pared:
-// random wait between 1.5s and 0.1sec
+                this->pared(threshold, ldata, ti, tj);
+                break;
+            case Estado::rotar:
+                this->rotar(threshold, ldata, i, j, alpha, target);
                 break;
         }
     }
@@ -113,13 +119,14 @@ int SpecificWorker::startup_check()
 
 int SpecificWorker::k(int cord) {
     int result = cord + 2500;
-    return (int)result/10;
+    return (int)result/50;
 }
 
-bool SpecificWorker::siguienteOcupada(int i, int j) {
+bool SpecificWorker::siguienteOcupada(int i, int j, float sum) {
     int si, sj;
     float alpha;
     this->differentialrobot_proxy->getBasePose(si, sj, alpha);
+    this->sumAng(alpha, sum);
     if( alpha < 0.5367 || alpha > 5.7727){
         sj = j + 1;
         si = i;
@@ -145,38 +152,88 @@ bool SpecificWorker::siguienteOcupada(int i, int j) {
         sj = j + 1;
         si = i - 1;
     }
+    if(sj > 99 || sj < 0 || si > 99 || si < 0)
+        return true;
 
     return this->pos[si][sj];
 }
 
-void SpecificWorker::avanzar(float threshold, auto distActual, int i, int j) {
-    //Condición de salida
-    if (threshold > distActual){
+void SpecificWorker::avanzar(float threshold, RoboCompLaser::TLaserData ldata, int i, int j) {
+    std::cout <<"________avanzar_______"<< std::endl;
+    if (threshold > ldata.front().dist ){
         this->est = Estado::pared;
         differentialrobot_proxy->setSpeedBase(0, 0);
         return;
-    } else if(siguienteOcupada(i, j)){
+    } else if(siguienteOcupada(i, j, 0) && !this->bloqueado){
         this->est = Estado::rotar;
         differentialrobot_proxy->setSpeedBase(0, 0);
         return;
     }
     differentialrobot_proxy->setSpeedBase(1000, 0);
+    this->rotaciones = 0;
+    this->rotando = false;
+    this->bloqueado = false;
 }
 
 void SpecificWorker::pared(float threshold,  RoboCompLaser::TLaserData ldata , int i, int j) {
-    float rot = 1.5708;
+    std::cout <<"________pared_______"<< std::endl;
+    float rot = 2;
     if (threshold < ldata.front().dist){
+        differentialrobot_proxy->setSpeedBase(0, 0);
         this->est = Estado::avanzar;
         return;
     }
     std::cout << ldata.front().dist << std::endl;
     differentialrobot_proxy->setSpeedBase(5, rot);
-    usleep(rand()%(1500000-100000 + 1) + 100000);
 }
 
-void SpecificWorker::bloqueo() {
-
+void SpecificWorker::rotar(float threshold,  RoboCompLaser::TLaserData ldata, int i, int j, float alpha, float &target) {
+    std::cout <<"________rotar_______"<<"Rotando "<<this->rotando<<"Bloqueado "<<this->bloqueado<< std::endl;
+    if (threshold > ldata.front().dist){
+        std::cout <<"________rotar1_______"<< std::endl;
+        differentialrobot_proxy->setSpeedBase(0, 0);
+        this->est = Estado::pared;
+        return;
+    }else if(abs((alpha- target)) < 0.01 ){
+        std::cout <<"________rotar2_______"<< std::endl;
+        differentialrobot_proxy->setSpeedBase(0, 0);
+        this->est = Estado::avanzar;
+        this->rotando = false;
+        return;
+    }
+    if(!this->rotando){
+        target = anguloObjetivo(i, j);
+        std::cout <<"________rotar3_______"<< std::endl;
+        this->rotando = true;
+        this->rotaciones++;
+        if(target == 0 || rotaciones > 1) {
+            this->bloqueado = true;
+            this->rotando = false;
+            std::cout <<"________bloqueado_______"<< std::endl;
+            this->est = Estado::avanzar;
+        }
+    }
+    differentialrobot_proxy->setSpeedBase(5, 2);
 }
+
+float SpecificWorker::sumAng(float ang, float add) {
+    if ((6.28319 - ang) > add)
+        return ang + add;
+    else
+        return add - (6.28319 - ang);
+}
+
+float SpecificWorker::anguloObjetivo(int i, int j) {
+    float ang = 0.523599;
+    while ( ang < 6.28319){
+        if(!this->siguienteOcupada(i, j, ang)){
+            return ang;
+        }
+        ang = ang + 0.523599;
+    }
+    return 0;
+}
+
 
 
 
